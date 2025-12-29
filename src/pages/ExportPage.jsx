@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useResume } from '../app/ResumeContext';
 
@@ -17,51 +17,26 @@ import { useResume } from '../app/ResumeContext';
 
 function ExportPage() {
   const navigate = useNavigate();
-  const { resume } = useResume();
+  const { resume, atsBreakdown } = useResume();
   
   const [exportFormat, setExportFormat] = useState('pdf');
   const [isExporting, setIsExporting] = useState(false);
+
+  const atsScore = atsBreakdown?.totalScore || 0;
+  const readinessLabel = atsScore >= 80 ? 'ATS Ready' : atsScore >= 65 ? 'Solid' : 'Needs Improvement';
+  const minExportScore = 65;
 
   // Extract data from resume context
   const { basics, summary, experience, education, skills, projects, metadata } = resume;
 
   /**
-   * Calculate ATS score based on resume completeness
-   */
-  const atsScore = useMemo(() => {
-    let score = 20;
-
-    if (summary && summary.length > 50) score += 10;
-    if (summary && summary.length > 150) score += 5;
-    if (summary && summary.length > 300) score += 5;
-
-    if (experience && experience.length > 0) {
-      score += 15;
-      const totalBullets = experience.reduce((acc, exp) => acc + exp.bullets.length, 0);
-      if (totalBullets >= 5) score += 10;
-    }
-
-    if (education && education.length > 0) score += 10;
-
-    if (skills) {
-      if (skills.length >= 5) score += 10;
-      if (skills.length >= 10) score += 5;
-    }
-
-    if (basics) {
-      if (basics.fullName) score += 2;
-      if (basics.email) score += 2;
-      if (basics.phone) score += 2;
-      if (basics.linkedin) score += 2;
-    }
-
-    return Math.min(score, 95);
-  }, [resume]);
-
-  /**
    * Handle export action (placeholder for future PDF generation)
    */
   const handleExportPDF = () => {
+    if (atsScore < minExportScore) {
+      alert(`Raise your ATS score to at least ${minExportScore} before exporting.`);
+      return;
+    }
     setIsExporting(true);
     setTimeout(() => {
       setIsExporting(false);
@@ -133,13 +108,16 @@ function ExportPage() {
                 Review your resume and export it as a professional document ready for job applications.
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="flex items-center gap-2 px-4 py-2 bg-green-100 text-green-700 rounded-full text-sm font-medium">
+            <div className="flex items-center gap-3">
+              <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium ${atsScore >= minExportScore ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
-                Ready to Export
-              </span>
+                {readinessLabel} • {atsScore}/100
+              </div>
+              {atsScore < minExportScore && (
+                <span className="text-xs text-amber-700">Score {minExportScore}+ to enable export</span>
+              )}
             </div>
           </div>
         </header>
@@ -376,7 +354,7 @@ function ExportPage() {
 
               <button
                 onClick={handleExportPDF}
-                disabled={isExporting}
+                disabled={isExporting || atsScore < minExportScore}
                 className="w-full mt-6 px-4 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl hover:shadow-lg hover:shadow-indigo-500/25 transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-70"
               >
                 {isExporting ? (
@@ -429,25 +407,31 @@ function ExportPage() {
             </div>
 
             {/* ATS Ready Badge */}
-            <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border border-green-200 p-6">
+            <div className={`rounded-2xl border p-6 ${atsScore >= minExportScore ? 'bg-gradient-to-br from-green-50 to-emerald-50 border-green-200' : 'bg-gradient-to-br from-amber-50 to-yellow-50 border-amber-200'}`}>
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
-                  <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className={`${atsScore >= minExportScore ? 'bg-green-100' : 'bg-amber-100'} w-12 h-12 rounded-xl flex items-center justify-center`}>
+                  <svg className={`w-6 h-6 ${atsScore >= minExportScore ? 'text-green-600' : 'text-amber-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                   </svg>
                 </div>
                 <div>
-                  <h3 className="font-semibold text-green-800">ATS Verified</h3>
-                  <p className="text-sm text-green-600">Score: {atsScore}/100</p>
+                  <h3 className={`font-semibold ${atsScore >= minExportScore ? 'text-green-800' : 'text-amber-800'}`}>{readinessLabel}</h3>
+                  <p className={`text-sm ${atsScore >= minExportScore ? 'text-green-700' : 'text-amber-700'}`}>Score: {atsScore}/100</p>
                 </div>
               </div>
-              <p className="text-sm text-green-700">
-                {atsScore >= 80
-                  ? 'Your resume is well-optimized for Applicant Tracking Systems and ready for submission.'
-                  : atsScore >= 60
-                  ? 'Your resume is fairly optimized. Consider adding more details to improve your score.'
-                  : 'Add more content to your resume to improve ATS compatibility.'}
+              <p className={`text-sm ${atsScore >= minExportScore ? 'text-green-700' : 'text-amber-700'}`}>
+                {atsScore >= minExportScore
+                  ? 'Your resume meets the ATS readiness threshold. You can export confidently.'
+                  : 'Address the checklist below to unlock export and improve ATS alignment.'}
               </p>
+              <div className="mt-3 space-y-2">
+                {(atsBreakdown?.improvementAreas || []).slice(0, 5).map((item, idx) => (
+                  <div key={idx} className="flex items-start gap-2 text-xs text-slate-700">
+                    <span className="mt-[2px] text-slate-400">•</span>
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* Last Updated */}

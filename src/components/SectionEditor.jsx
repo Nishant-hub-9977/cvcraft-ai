@@ -24,20 +24,11 @@ function SectionEditor({
   onChange, 
   placeholder, 
   icon,
-  type = 'text' // 'text' | 'bullets' | 'skills'
+  type = 'text', // 'text' | 'bullets' | 'skills'
+  tips = [],
 }) {
   // UI-only state
   const [isFocused, setIsFocused] = useState(false);
-  const [isEnhancing, setIsEnhancing] = useState(false);
-
-  // Handle AI enhancement (placeholder for future implementation)
-  const handleAIEnhance = () => {
-    setIsEnhancing(true);
-    setTimeout(() => {
-      setIsEnhancing(false);
-      alert('AI Enhancement feature coming soon!');
-    }, 1000);
-  };
 
   // Handle clearing the content
   const handleClear = () => {
@@ -126,14 +117,6 @@ function SectionEditor({
           <span className={`text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 ${getCharacterCountColor()}`}>
             {characterCount} characters
           </span>
-          {hasContent && (
-            <span className="flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2.5 py-1 rounded-full">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-              Saved
-            </span>
-          )}
         </div>
       </div>
 
@@ -147,47 +130,26 @@ function SectionEditor({
           placeholder={placeholder || `Enter your ${title.toLowerCase()} here...`}
           className="w-full h-40 p-4 bg-slate-50 border border-slate-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 focus:bg-white text-slate-700 placeholder-slate-400 transition-all duration-200 text-sm leading-relaxed"
         />
+        {tips.length > 0 && (
+          <div className="mt-3 bg-slate-50 border border-slate-200 rounded-xl p-3">
+            <p className="text-xs font-semibold text-slate-700 mb-2">ATS tips</p>
+            <ul className="space-y-1">
+              {tips.map((tip, idx) => (
+                <li key={idx} className="flex items-start gap-2 text-xs text-slate-600">
+                  <span className="text-slate-400 mt-[2px]">•</span>
+                  <span>{tip}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       {/* Actions */}
       <div className="px-6 pb-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleAIEnhance}
-            disabled={isEnhancing || !hasContent}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
-              isEnhancing || !hasContent
-                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                : 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white hover:shadow-lg hover:shadow-indigo-500/25 hover:-translate-y-0.5'
-            }`}
-          >
-            {isEnhancing ? (
-              <>
-                <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Enhancing...
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                AI Enhance
-              </>
-            )}
-          </button>
-
-          <button
-            type="button"
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Tips
-          </button>
+        <div className="flex items-center gap-3 text-xs text-slate-500">
+          <span className="px-2 py-1 rounded-full bg-slate-100">Live ATS feedback</span>
+          {tips.length > 0 && <span className="text-amber-600">{tips.length} tip{tips.length > 1 ? 's' : ''}</span>}
         </div>
 
         {hasContent && (

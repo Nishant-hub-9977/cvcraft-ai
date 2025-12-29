@@ -1,5 +1,6 @@
-import { createContext, useContext, useReducer, useCallback } from 'react';
+import { createContext, useContext, useReducer, useCallback, useMemo } from 'react';
 import defaultResumeSchema from './resumeSchema';
+import { getATSBreakdown } from './atsEngine';
 
 /**
  * Resume Context
@@ -200,6 +201,49 @@ const ResumeContext = createContext(null);
 export function ResumeProvider({ children }) {
   const [resume, dispatch] = useReducer(resumeReducer, defaultResumeSchema);
 
+  // Derived ATS insights computed from resume state on every change
+  const atsInsights = useMemo(() => getATSBreakdown(resume), [resume]);
+
+  // Section-specific guidance derived from ATS signals (purely computed)
+  const sectionTips = useMemo(() => {
+    const tips = {
+      summary: [],
+      experience: [],
+      education: [],
+      skills: [],
+      projects: [],
+    };
+
+    if ((resume.summary || '').length < 80) {
+      tips.summary.push('Write 2-3 sentences (80-200 chars) with role, scope, and impact.');
+    }
+    if (atsInsights.keywordCoverage.missingKeywords.length) {
+      tips.summary.push(`Work in impact keywords like ${atsInsights.keywordCoverage.missingKeywords.slice(0, 3).join(', ')}.`);
+    }
+
+    tips.experience.push(...atsInsights.experienceQuality.issues);
+    if ((resume.experience || []).length === 0) {
+      tips.experience.push('Add at least one role with dates and 3+ bullets.');
+    }
+
+    if ((resume.education || []).length === 0) {
+      tips.education.push('Add your latest degree or certification.');
+    }
+
+    if ((resume.skills || []).length < 5) {
+      tips.skills.push('List 5-10 relevant skills on separate lines.');
+    }
+    if (atsInsights.keywordCoverage.missingSkills.length) {
+      tips.skills.push(`Mention skills in your bullets: ${atsInsights.keywordCoverage.missingSkills.slice(0, 3).join(', ')}.`);
+    }
+
+    if ((resume.projects || []).length === 0) {
+      tips.projects.push('Add 1-2 projects with outcomes and tech stack.');
+    }
+
+    return tips;
+  }, [atsInsights, resume.education, resume.experience, resume.projects, resume.skills, resume.summary]);
+
   // Update entire section (e.g., 'basics', 'experience')
   const updateSection = useCallback((sectionKey, payload) => {
     dispatch({ type: ACTIONS.UPDATE_SECTION, sectionKey, payload });
@@ -238,6 +282,9 @@ export function ResumeProvider({ children }) {
   const contextValue = {
     // State
     resume,
+    atsScore: atsInsights.totalScore,
+    atsBreakdown: atsInsights,
+    getSectionTips: (sectionKey) => sectionTips[sectionKey] || [],
     
     // Actions
     updateSection,

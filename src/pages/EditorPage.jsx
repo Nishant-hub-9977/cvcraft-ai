@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useResume } from '../app/ResumeContext';
 import SectionEditor from '../components/SectionEditor';
 import ATSScorePanel from '../components/ATSScorePanel';
+import { generateId } from '../app/resumeSchema';
 
 /**
  * EditorPage Component
@@ -73,10 +74,62 @@ function EditorPage() {
   const navigate = useNavigate();
   
   // Get resume state and actions from context
-  const { resume, updateField, updateSection } = useResume();
+  const { resume, updateField, updateSection, atsBreakdown, getSectionTips } = useResume();
   
   // UI-only local state
   const [activeSection, setActiveSection] = useState('summary');
+
+  const parseExperienceText = (text, current = []) => {
+    const blocks = text.split(/\n\s*\n/).filter((b) => b.trim().length);
+    if (!blocks.length && text.trim().length) {
+      blocks.push(text);
+    }
+    return (blocks.length ? blocks : ['']).map((block, idx) => {
+      const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
+      const header = lines.shift() || 'Experience';
+      let role = header;
+      let company = '';
+      if (header.includes(' at ')) {
+        const parts = header.split(' at ');
+        role = parts[0];
+        company = parts.slice(1).join(' at ');
+      }
+      const bullets = lines
+        .map((line) => line.replace(/^[-•]\s*/, '').trim())
+        .filter((line) => line.length);
+      const currentItem = current[idx] || {};
+      return {
+        id: currentItem.id || generateId('exp'),
+        role: role || currentItem.role || 'Role',
+        company: company || currentItem.company || 'Company',
+        startDate: currentItem.startDate || '',
+        endDate: currentItem.endDate || '',
+        bullets: bullets.length ? bullets : currentItem.bullets || ['Add measurable bullet points.'],
+      };
+    });
+  };
+
+  const parseEducationText = (text, current = []) => {
+    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (!lines.length && text.trim().length) {
+      lines.push(text.trim());
+    }
+    return (lines.length ? lines : ['']).map((line, idx) => {
+      const parts = line.split('-').map((p) => p.trim());
+      const degree = parts[0] || 'Degree';
+      const institution = parts[1] || parts[0] || 'Institution';
+      const currentItem = current[idx] || {};
+      return {
+        id: currentItem.id || generateId('edu'),
+        institution,
+        degree,
+        startYear: currentItem.startYear || '',
+        endYear: currentItem.endYear || '',
+        gpa: currentItem.gpa || '',
+        highlights: currentItem.highlights || [],
+      };
+    });
+  };
 
   /**
    * Handle section change from SectionEditor
@@ -89,13 +142,14 @@ function EditorPage() {
     } else if (sectionKey === 'skills') {
       // Skills is an array of strings
       updateSection('skills', Array.isArray(value) ? value : [value]);
-    } else if (sectionKey === 'experience' || sectionKey === 'education') {
-      // For complex arrays, we convert the text to a simplified format
-      // This allows text-based editing while maintaining array structure
-      // Future: Add dedicated array editors for these sections
-      const lines = Array.isArray(value) ? value : value.split('\n').filter(Boolean);
-      // Store as simplified text for now - will be enhanced in future phases
-      updateField(`_${sectionKey}Text`, lines.join('\n'));
+    } else if (sectionKey === 'experience') {
+      const parsed = parseExperienceText(Array.isArray(value) ? value.join('\n') : value, resume.experience);
+      updateSection('experience', parsed);
+      updateField('_experienceText', Array.isArray(value) ? value.join('\n') : value);
+    } else if (sectionKey === 'education') {
+      const parsed = parseEducationText(Array.isArray(value) ? value.join('\n') : value, resume.education);
+      updateSection('education', parsed);
+      updateField('_educationText', Array.isArray(value) ? value.join('\n') : value);
     }
   };
 
@@ -170,49 +224,6 @@ function EditorPage() {
     };
   }, [resume]);
 
-  /**
-   * Calculate dynamic ATS score based on resume content
-   */
-  const calculateATSScore = useMemo(() => {
-    let score = 20; // Base score
-
-    // Summary scoring
-    if (resume.summary) {
-      if (resume.summary.length > 50) score += 10;
-      if (resume.summary.length > 150) score += 5;
-      if (resume.summary.length > 300) score += 5;
-    }
-
-    // Experience scoring
-    if (resume.experience && resume.experience.length > 0) {
-      score += 15;
-      const totalBullets = resume.experience.reduce((acc, exp) => acc + exp.bullets.length, 0);
-      if (totalBullets >= 5) score += 10;
-    }
-
-    // Education scoring
-    if (resume.education && resume.education.length > 0) {
-      score += 10;
-    }
-
-    // Skills scoring
-    if (resume.skills) {
-      if (resume.skills.length >= 5) score += 10;
-      if (resume.skills.length >= 10) score += 5;
-    }
-
-    // Basics completeness
-    const basics = resume.basics;
-    if (basics) {
-      if (basics.fullName) score += 2;
-      if (basics.email) score += 2;
-      if (basics.phone) score += 2;
-      if (basics.linkedin) score += 2;
-    }
-
-    return Math.min(score, 95);
-  }, [resume]);
-
   const handlePreviewExport = () => {
     navigate('/export');
   };
@@ -229,6 +240,11 @@ function EditorPage() {
       return data.length > 0 && data.some((item) => item.length > 0);
     }
     return false;
+  };
+
+  const sectionNeedsAttention = (key) => {
+    const missing = atsBreakdown?.sectionCompleteness?.missingSections || [];
+    return missing.includes(key) || (getSectionTips(key)?.length > 0 && sectionHasContent(key));
   };
 
   return (
@@ -253,7 +269,7 @@ function EditorPage() {
             <div>
               <h1 className="text-3xl font-bold text-slate-800 mb-2">Edit Your Resume</h1>
               <p className="text-slate-600">
-                Customize each section of your resume. Our AI will help optimize your content for ATS systems.
+                Customize each section of your resume. The live ATS engine keeps your content aligned and scorable.
               </p>
             </div>
             <div className="flex items-center gap-4">
@@ -303,6 +319,8 @@ function EditorPage() {
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all duration-200 ${
                       activeSection === key
                         ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/25'
+                        : sectionNeedsAttention(key)
+                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
                         : sectionHasContent(key)
                         ? 'bg-green-50 text-green-700 border border-green-200'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -336,6 +354,7 @@ function EditorPage() {
                   placeholder={placeholder}
                   icon={sectionIcons[key]}
                   type={type}
+                  tips={getSectionTips(key)}
                 />
               </div>
             ))}
@@ -379,9 +398,9 @@ function EditorPage() {
 
           {/* Right Column - ATS Panel */}
           <div className="space-y-6">
-            <ATSScorePanel score={calculateATSScore} />
+            <ATSScorePanel />
 
-            {/* Tips Card */}
+            {/* Dynamic Tips Card */}
             <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center">
@@ -389,33 +408,17 @@ function EditorPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                   </svg>
                 </div>
-                <h3 className="font-semibold text-slate-800">Writing Tips</h3>
+                <h3 className="font-semibold text-slate-800">ATS Improvement Tips</h3>
               </div>
               <ul className="space-y-3 text-sm text-slate-600">
-                <li className="flex items-start gap-2">
-                  <svg className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  Use action verbs like "Led", "Developed", "Managed"
-                </li>
-                <li className="flex items-start gap-2">
-                  <svg className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  Include quantifiable achievements and metrics
-                </li>
-                <li className="flex items-start gap-2">
-                  <svg className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  Match keywords from the job description
-                </li>
-                <li className="flex items-start gap-2">
-                  <svg className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  Keep your summary concise (2-3 sentences)
-                </li>
+                {(atsBreakdown?.improvementAreas || ['No major gaps detected.']).slice(0, 6).map((tip, idx) => (
+                  <li key={idx} className="flex items-start gap-2">
+                    <svg className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    {tip}
+                  </li>
+                ))}
               </ul>
             </div>
 
