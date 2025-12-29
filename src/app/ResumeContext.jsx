@@ -1,6 +1,6 @@
 import { createContext, useContext, useReducer, useCallback, useMemo } from 'react';
 import defaultResumeSchema from './resumeSchema';
-import { getATSBreakdown } from './atsEngine';
+import { getATSBreakdown, getResumeReadiness, isResumeReadyForExport } from './atsEngine';
 
 /**
  * Resume Context
@@ -204,6 +204,10 @@ export function ResumeProvider({ children }) {
   // Derived ATS insights computed from resume state on every change
   const atsInsights = useMemo(() => getATSBreakdown(resume), [resume]);
 
+  // Derived resume readiness (pure computation, no state mutation)
+  const resumeReadiness = useMemo(() => getResumeReadiness(resume), [resume]);
+  const resumeReadyForExport = useMemo(() => isResumeReadyForExport(resume), [resume]);
+
   // Section-specific guidance derived from ATS signals (purely computed)
   const sectionTips = useMemo(() => {
     const tips = {
@@ -284,7 +288,10 @@ export function ResumeProvider({ children }) {
     resume,
     atsScore: atsInsights.totalScore,
     atsBreakdown: atsInsights,
+    resumeReadiness,
+    resumeReadyForExport,
     getSectionTips: (sectionKey) => sectionTips[sectionKey] || [],
+    isResumeReadyForExport: () => resumeReadyForExport,
     
     // Actions
     updateSection,

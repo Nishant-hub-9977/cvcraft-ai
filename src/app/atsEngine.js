@@ -21,6 +21,51 @@ const clamp = (value, min = 0, max = 100) => Math.min(Math.max(value, min), max)
 
 const normalizeText = (value) => (value || '').toString().toLowerCase();
 
+// Derived readiness selector (pure, no state mutation)
+const getResumeReadiness = (resume) => {
+  const missingSections = [];
+  let passed = 0;
+
+  const fullName = resume?.basics?.fullName?.trim();
+  const headline = resume?.basics?.headline?.trim();
+  if (!fullName) missingSections.push('Full name');
+  if (!headline) missingSections.push('Headline');
+  if (fullName && headline) passed++;
+
+  const summary = (resume?.summary || '').trim();
+  if (summary.length >= 60) {
+    passed++;
+  } else {
+    missingSections.push('Summary (min 60 characters)');
+  }
+
+  const experiences = resume?.experience || [];
+  const hasStrongExperience = experiences.some(
+    (exp) => (exp?.bullets || []).filter((b) => b && b.trim().length).length >= 2
+  );
+  if (experiences.length && hasStrongExperience) {
+    passed++;
+  } else {
+    missingSections.push('Experience with at least 2 bullets');
+  }
+
+  const skills = (resume?.skills || []).filter(Boolean);
+  if (skills.length >= 5) {
+    passed++;
+  } else {
+    missingSections.push('Add at least 5 skills');
+  }
+
+  const completenessScore = clamp(Math.round((passed / 4) * 100), 0, 100);
+
+  return {
+    completenessScore,
+    missingSections,
+  };
+};
+
+const isResumeReadyForExport = (resume) => getResumeReadiness(resume).missingSections.length === 0;
+
 const collectResumeText = (resume) => {
   const summary = normalizeText(resume.summary);
   const experienceText = (resume.experience || [])
@@ -239,5 +284,13 @@ const getATSBreakdown = (resume) => {
 
 const scoreResume = (resume) => getATSBreakdown(resume).totalScore;
 
-export { scoreResume, getATSBreakdown, getKeywordCoverage, getSectionCompleteness, getFormattingSignals };
+export {
+  scoreResume,
+  getATSBreakdown,
+  getKeywordCoverage,
+  getSectionCompleteness,
+  getFormattingSignals,
+  getResumeReadiness,
+  isResumeReadyForExport,
+};
 export default scoreResume;
