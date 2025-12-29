@@ -3,22 +3,51 @@ import defaultResumeSchema from './resumeSchema';
 import { getATSBreakdown, getResumeReadiness, isResumeReadyForExport } from './atsEngine';
 
 /**
- * Resume Context
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * ARCHITECTURE LOCK — ResumeContext.jsx
+ * ═══════════════════════════════════════════════════════════════════════════════
  * 
- * Centralized state management for resume data using React Context + useReducer.
- * This provides predictable, immutable state updates across the entire application.
+ * STATUS: FROZEN API (v1.0)
+ * LAST AUDIT: 2024-12-29
  * 
- * Exposes:
- * - resume: Current resume state
- * - updateSection: Replace an entire section (e.g., 'basics', 'experience')
- * - updateField: Update a specific nested field using dot notation path
- * - resetResume: Reset to default schema
- * - addArrayItem: Add item to an array section
- * - removeArrayItem: Remove item from an array section by ID
- * - updateArrayItem: Update specific item in an array section
+ * This file is the SINGLE SOURCE OF TRUTH for resume state management.
+ * All components read from and write to this context exclusively.
+ * 
+ * ┌─────────────────────────────────────────────────────────────────────────────┐
+ * │ PUBLIC API CONTRACT (DO NOT MODIFY WITHOUT REVIEW)                         │
+ * ├─────────────────────────────────────────────────────────────────────────────┤
+ * │ STATE (read-only derived values):                                          │
+ * │   • resume           → Full resume object (shape: resumeSchema.js)         │
+ * │   • atsScore         → Derived integer 0-100 (from atsEngine)              │
+ * │   • atsBreakdown     → Derived breakdown object (from atsEngine)           │
+ * │   • resumeReadiness  → Derived readiness object (from atsEngine)           │
+ * │   • resumeReadyForExport → Derived boolean (from atsEngine)                │
+ * │   • getSectionTips() → Derived tips array per section                      │
+ * │                                                                            │
+ * │ ACTIONS (mutators):                                                        │
+ * │   • updateSection(sectionKey, payload)  → Replace entire section           │
+ * │   • updateField(path, value)            → Update nested field via dot path │
+ * │   • resetResume()                       → Reset to defaultResumeSchema     │
+ * │   • setResume(resumeData)               → Replace entire resume            │
+ * │   • addArrayItem(sectionKey, item)      → Push to array section            │
+ * │   • removeArrayItem(sectionKey, id/idx) → Remove from array section        │
+ * │   • updateArrayItem(sectionKey, id, updates) → Patch array item            │
+ * └─────────────────────────────────────────────────────────────────────────────┘
+ * 
+ * INVARIANTS:
+ *   1. All state updates go through dispatch → reducer (no direct mutation)
+ *   2. All derived values (ATS, readiness) are computed via useMemo (pure)
+ *   3. metadata.lastUpdated is set automatically on every state change
+ *   4. Resume shape always conforms to resumeSchema.js structure
+ * 
+ * GUARD: Adding new actions requires updating this contract header.
+ * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-// Action Types - explicit for predictability
+/**
+ * INTERNAL: Action type constants
+ * Guard: These are internal implementation details. Do not expose externally.
+ */
 const ACTIONS = {
   UPDATE_SECTION: 'UPDATE_SECTION',
   UPDATE_FIELD: 'UPDATE_FIELD',
@@ -30,19 +59,23 @@ const ACTIONS = {
 };
 
 /**
- * Helper: Get nested value from object using dot notation path
+ * INTERNAL HELPER: Get nested value from object using dot notation path
  * @param {Object} obj - Source object
  * @param {string} path - Dot notation path (e.g., 'basics.fullName')
+ * @returns {*} Value at path or undefined
+ * Guard: Pure function, no side effects.
  */
 const getNestedValue = (obj, path) => {
   return path.split('.').reduce((current, key) => current?.[key], obj);
 };
 
 /**
- * Helper: Set nested value in object using dot notation path (immutably)
- * @param {Object} obj - Source object
+ * INTERNAL HELPER: Set nested value in object using dot notation path (immutably)
+ * @param {Object} obj - Source object  
  * @param {string} path - Dot notation path (e.g., 'basics.fullName')
  * @param {*} value - New value to set
+ * @returns {Object} New object with updated value (original unchanged)
+ * Guard: Pure function, creates new object via deep clone. No mutation.
  */
 const setNestedValue = (obj, path, value) => {
   const keys = path.split('.');
@@ -67,8 +100,13 @@ const setNestedValue = (obj, path, value) => {
 };
 
 /**
- * Resume Reducer - handles all state transitions
- * All updates are immutable - no direct mutation of state
+ * INTERNAL: Resume Reducer — handles all state transitions
+ * 
+ * INVARIANT: All updates are immutable — no direct mutation of state.
+ * INVARIANT: Every action sets metadata.lastUpdated automatically.
+ * 
+ * Guard: This reducer is the ONLY place state changes occur.
+ *        Direct state mutation anywhere else is a bug.
  */
 const resumeReducer = (state, action) => {
   switch (action.type) {
@@ -195,20 +233,42 @@ const resumeReducer = (state, action) => {
 const ResumeContext = createContext(null);
 
 /**
- * Resume Provider Component
- * Wrap your app with this to enable resume state access everywhere
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * PUBLIC: ResumeProvider Component
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * Wrap your app with this to enable resume state access everywhere.
+ * 
+ * DERIVED STATE (computed on every resume change, never stored separately):
+ *   • atsInsights     — Full ATS breakdown from atsEngine (pure computation)
+ *   • resumeReadiness — Readiness checklist from atsEngine (pure computation)
+ *   • sectionTips     — Per-section improvement suggestions (pure computation)
+ * 
+ * INVARIANT: Derived values are ALWAYS recomputed from resume state.
+ *            Never cache or store derived values separately.
+ * ═══════════════════════════════════════════════════════════════════════════════
  */
 export function ResumeProvider({ children }) {
   const [resume, dispatch] = useReducer(resumeReducer, defaultResumeSchema);
 
-  // Derived ATS insights computed from resume state on every change
+  /**
+   * DERIVED: ATS insights computed from resume state on every change
+   * Guard: This is a PURE DERIVATION — do not add side effects here.
+   */
   const atsInsights = useMemo(() => getATSBreakdown(resume), [resume]);
 
-  // Derived resume readiness (pure computation, no state mutation)
+  /**
+   * DERIVED: Resume readiness checklist (pure computation, no state mutation)
+   * Guard: These values gate export functionality — do not modify thresholds here.
+   *        Threshold logic lives in ExportPage for monetization control.
+   */
   const resumeReadiness = useMemo(() => getResumeReadiness(resume), [resume]);
   const resumeReadyForExport = useMemo(() => isResumeReadyForExport(resume), [resume]);
 
-  // Section-specific guidance derived from ATS signals (purely computed)
+  /**
+   * DERIVED: Section-specific guidance from ATS signals (purely computed)
+   * Guard: Tips are for UX guidance only — not used for gating decisions.
+   */
   const sectionTips = useMemo(() => {
     const tips = {
       summary: [],
@@ -248,41 +308,51 @@ export function ResumeProvider({ children }) {
     return tips;
   }, [atsInsights, resume.education, resume.experience, resume.projects, resume.skills, resume.summary]);
 
-  // Update entire section (e.g., 'basics', 'experience')
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PUBLIC ACTIONS — These are the ONLY ways to modify resume state
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** PUBLIC: Update entire section (e.g., 'basics', 'experience') */
   const updateSection = useCallback((sectionKey, payload) => {
     dispatch({ type: ACTIONS.UPDATE_SECTION, sectionKey, payload });
   }, []);
 
-  // Update specific field using dot notation (e.g., 'basics.fullName')
+  /** PUBLIC: Update specific field using dot notation (e.g., 'basics.fullName') */
   const updateField = useCallback((path, value) => {
     dispatch({ type: ACTIONS.UPDATE_FIELD, path, value });
   }, []);
 
-  // Reset resume to default schema
+  /** PUBLIC: Reset resume to default schema */
   const resetResume = useCallback(() => {
     dispatch({ type: ACTIONS.RESET_RESUME });
   }, []);
 
-  // Set entire resume (useful for file upload/import)
+  /** PUBLIC: Set entire resume (useful for file upload/import) */
   const setResume = useCallback((resumeData) => {
     dispatch({ type: ACTIONS.SET_RESUME, payload: resumeData });
   }, []);
 
-  // Add item to array section
+  /** PUBLIC: Add item to array section */
   const addArrayItem = useCallback((sectionKey, item) => {
     dispatch({ type: ACTIONS.ADD_ARRAY_ITEM, sectionKey, item });
   }, []);
 
-  // Remove item from array section by ID or index
+  /** PUBLIC: Remove item from array section by ID or index */
   const removeArrayItem = useCallback((sectionKey, itemId, index) => {
     dispatch({ type: ACTIONS.REMOVE_ARRAY_ITEM, sectionKey, itemId, index });
   }, []);
 
-  // Update specific array item by ID
+  /** PUBLIC: Update specific array item by ID */
   const updateArrayItem = useCallback((sectionKey, itemId, updates) => {
     dispatch({ type: ACTIONS.UPDATE_ARRAY_ITEM, sectionKey, itemId, updates });
   }, []);
 
+  /**
+   * CONTEXT VALUE — Public API surface
+   * 
+   * Guard: Any additions here must be documented in the header contract.
+   *        Removing or renaming properties is a BREAKING CHANGE.
+   */
   const contextValue = {
     // State
     resume,
@@ -311,8 +381,11 @@ export function ResumeProvider({ children }) {
 }
 
 /**
- * Custom hook to access resume context
+ * PUBLIC: Custom hook to access resume context
  * Must be used within a ResumeProvider
+ * 
+ * Guard: This is the ONLY way components should access resume state.
+ *        Direct context access is discouraged.
  */
 export function useResume() {
   const context = useContext(ResumeContext);

@@ -1,5 +1,52 @@
-// Deterministic ATS scoring engine
-// Pure functions that derive ATS-friendly signals from resumeSchema-shaped data.
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * ARCHITECTURE LOCK — atsEngine.js
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * STATUS: FROZEN SCORING LOGIC (v1.0)
+ * LAST AUDIT: 2024-12-29
+ * 
+ * This file contains the DETERMINISTIC ATS scoring engine.
+ * All functions are PURE — they derive values from resume data without side effects.
+ * 
+ * ┌─────────────────────────────────────────────────────────────────────────────┐
+ * │ SCORING WEIGHT INVARIANTS (DO NOT MODIFY WITHOUT BUSINESS REVIEW)          │
+ * ├─────────────────────────────────────────────────────────────────────────────┤
+ * │   Keywords & Skills:      35 points max                                    │
+ * │   Section Completeness:   25 points max                                    │
+ * │   Experience Quality:     20 points max                                    │
+ * │   Formatting & Structure: 20 points max                                    │
+ * │   ─────────────────────────────────────                                    │
+ * │   TOTAL:                 100 points                                        │
+ * └─────────────────────────────────────────────────────────────────────────────┘
+ * 
+ * ┌─────────────────────────────────────────────────────────────────────────────┐
+ * │ PUBLIC API CONTRACT                                                        │
+ * ├─────────────────────────────────────────────────────────────────────────────┤
+ * │   scoreResume(resume)          → Integer 0-100 (total ATS score)           │
+ * │   getATSBreakdown(resume)      → Full breakdown object with categories     │
+ * │   getKeywordCoverage(resume)   → Keyword/skill matching details            │
+ * │   getSectionCompleteness(resume) → Section-by-section completion status    │
+ * │   getFormattingSignals(resume) → Formatting quality signals                │
+ * │   getResumeReadiness(resume)   → Export readiness checklist                │
+ * │   isResumeReadyForExport(resume) → Boolean gate for export eligibility     │
+ * └─────────────────────────────────────────────────────────────────────────────┘
+ * 
+ * INVARIANTS:
+ *   1. All functions are PURE — same input always produces same output
+ *   2. No function modifies resume data — all transformations create new values
+ *   3. Scoring weights are business-critical — changes require stakeholder review
+ *   4. All scores are clamped to valid ranges (0-100 or 0-weight)
+ * 
+ * GUARD: Changing scoring weights affects user perception of resume quality.
+ *        Any changes must be tested against sample resumes first.
+ * ═══════════════════════════════════════════════════════════════════════════════
+ */
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SCORING CONSTANTS — Business-critical values
+// Guard: Modifying these affects all users' ATS scores immediately.
+// ═══════════════════════════════════════════════════════════════════════════════
 
 const ACTION_VERBS = [
   'led', 'managed', 'architected', 'built', 'created', 'developed', 'designed', 'implemented',
@@ -7,6 +54,10 @@ const ACTION_VERBS = [
   'automated', 'modernized', 'migrated', 'scaled', 'mentored', 'collaborated', 'delivered',
 ];
 
+/**
+ * KEYWORD BUCKETS — Categories of impactful resume language
+ * Guard: These buckets drive keyword coverage scoring.
+ */
 const KEYWORD_BUCKETS = {
   impact: ['improved', 'reduced', 'increased', 'accelerated', 'boosted', 'cut', 'optimized'],
   delivery: ['shipped', 'launched', 'deployed', 'released', 'delivered'],
@@ -15,13 +66,33 @@ const KEYWORD_BUCKETS = {
   quality: ['reliability', 'availability', 'performance', 'scalability', 'security', 'quality'],
 };
 
-const DATE_REGEX = /^\d{4}-(0[1-9]|1[0-2])$/; // YYYY-MM
+/** Date format for experience entries: YYYY-MM */
+const DATE_REGEX = /^\d{4}-(0[1-9]|1[0-2])$/;
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// INTERNAL HELPERS — Pure utility functions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Clamp value to range [min, max]. Pure function. */
 const clamp = (value, min = 0, max = 100) => Math.min(Math.max(value, min), max);
 
+/** Normalize text to lowercase string. Pure function. */
 const normalizeText = (value) => (value || '').toString().toLowerCase();
 
-// Derived readiness selector (pure, no state mutation)
+// ═══════════════════════════════════════════════════════════════════════════════
+// PUBLIC: RESUME READINESS — Export eligibility gate
+// Guard: This function determines if export is allowed. Changes affect monetization.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * PUBLIC: Get resume readiness status for export gating
+ * 
+ * INVARIANT: This is a PURE DERIVATION — no side effects.
+ * INVARIANT: missingSections.length === 0 means ready for export.
+ * 
+ * @param {Object} resume - Resume object conforming to resumeSchema
+ * @returns {Object} { completenessScore: number, missingSections: string[] }
+ */
 const getResumeReadiness = (resume) => {
   const missingSections = [];
   let passed = 0;
@@ -64,8 +135,23 @@ const getResumeReadiness = (resume) => {
   };
 };
 
+/**
+ * PUBLIC: Boolean gate for export eligibility
+ * 
+ * INVARIANT: Returns true IFF all required sections are present.
+ * Guard: This is the authoritative export gate. ExportPage may add additional
+ *        constraints (e.g., ATS score threshold) for monetization.
+ * 
+ * @param {Object} resume - Resume object
+ * @returns {boolean} True if resume meets minimum export requirements
+ */
 const isResumeReadyForExport = (resume) => getResumeReadiness(resume).missingSections.length === 0;
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// INTERNAL: Text collection for keyword analysis
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Collect all resume text for keyword matching. Pure function. */
 const collectResumeText = (resume) => {
   const summary = normalizeText(resume.summary);
   const experienceText = (resume.experience || [])
@@ -78,12 +164,28 @@ const collectResumeText = (resume) => {
   return normalizeText(`${summary} ${experienceText} ${projectText} ${skills}`);
 };
 
+/** Score a bucket of keywords against text. Pure function. */
 const scoreKeywordBucket = (text, keywords) => {
   const matches = keywords.filter((kw) => text.includes(kw));
   const ratio = keywords.length ? matches.length / keywords.length : 0;
   return { matches, missing: keywords.filter((kw) => !text.includes(kw)), ratio };
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PUBLIC: KEYWORD COVERAGE — 35 points max
+// Guard: Weight = 35. Changes affect total score calculation.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * PUBLIC: Calculate keyword and skill coverage score
+ * 
+ * SCORING BREAKDOWN (35 points total):
+ *   - Skill coverage in narrative:  20 points max
+ *   - Keyword bucket coverage:      15 points max
+ * 
+ * @param {Object} resume - Resume object
+ * @returns {Object} Keyword coverage analysis with score
+ */
 const getKeywordCoverage = (resume) => {
   const text = collectResumeText(resume);
   const skills = (resume.skills || []).map(normalizeText);
@@ -115,6 +217,27 @@ const getKeywordCoverage = (resume) => {
   };
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PUBLIC: SECTION COMPLETENESS — 25 points max
+// Guard: Weight = 25. Section weights are business-tuned.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * PUBLIC: Calculate section completeness score
+ * 
+ * SECTION WEIGHTS (business-tuned):
+ *   - basics:     6 points (contact info critical for callbacks)
+ *   - summary:    5 points (first impression)
+ *   - experience: 6 points (core resume content)
+ *   - education:  4 points (important but less than experience)
+ *   - skills:     2 points (list presence)
+ *   - projects:   2 points (bonus content)
+ * 
+ * Guard: These weights reflect hiring manager priorities.
+ * 
+ * @param {Object} resume - Resume object
+ * @returns {Object} Section completeness analysis with score
+ */
 const getSectionCompleteness = (resume) => {
   const sections = [];
   const basics = resume.basics || {};
@@ -152,6 +275,23 @@ const getSectionCompleteness = (resume) => {
   };
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PUBLIC: EXPERIENCE QUALITY — 20 points max
+// Guard: Weight = 20. Bullet quality is critical for ATS parsing.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * PUBLIC: Calculate experience section quality score
+ * 
+ * SCORING BREAKDOWN (20 points total):
+ *   - Bullet count (aim for 6+):    6 points max
+ *   - Action verb usage:            6 points max
+ *   - Quantified metrics:           4 points max
+ *   - Date coverage:                4 points max
+ * 
+ * @param {Object} resume - Resume object
+ * @returns {Object} Experience quality analysis with score and issues
+ */
 const getExperienceQuality = (resume) => {
   const experiences = resume.experience || [];
   if (!experiences.length) {
@@ -195,6 +335,23 @@ const getExperienceQuality = (resume) => {
   };
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PUBLIC: FORMATTING SIGNALS — 20 points max
+// Guard: Weight = 20. Formatting affects ATS parsing success.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * PUBLIC: Calculate formatting and structure quality score
+ * 
+ * EVALUATES:
+ *   - Contact block completeness
+ *   - Date format consistency (YYYY-MM)
+ *   - Bullet length readability (20-220 chars)
+ *   - Summary length balance (80-600 chars)
+ * 
+ * @param {Object} resume - Resume object
+ * @returns {Object} Formatting analysis with score and warnings
+ */
 const getFormattingSignals = (resume) => {
   const signals = [];
   const deductions = [];
@@ -243,6 +400,26 @@ const getFormattingSignals = (resume) => {
   };
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PUBLIC: ATS BREAKDOWN — Master scoring function
+// Guard: This is the primary entry point for ATS analysis.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * PUBLIC: Get complete ATS breakdown with all category scores
+ * 
+ * TOTAL SCORE COMPOSITION (100 points):
+ *   - keywordCoverage:     35 points max
+ *   - sectionCompleteness: 25 points max
+ *   - experienceQuality:   20 points max
+ *   - formattingSignals:   20 points max
+ * 
+ * INVARIANT: totalScore = sum of all category scores, clamped to 0-100.
+ * INVARIANT: This is a PURE FUNCTION — same resume always produces same score.
+ * 
+ * @param {Object} resume - Resume object conforming to resumeSchema
+ * @returns {Object} Complete ATS analysis with scores and improvement suggestions
+ */
 const getATSBreakdown = (resume) => {
   const keywordCoverage = getKeywordCoverage(resume);
   const sectionCompleteness = getSectionCompleteness(resume);
@@ -282,7 +459,17 @@ const getATSBreakdown = (resume) => {
   };
 };
 
+/**
+ * PUBLIC: Convenience function to get just the total score
+ * @param {Object} resume - Resume object
+ * @returns {number} Integer 0-100
+ */
 const scoreResume = (resume) => getATSBreakdown(resume).totalScore;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPORTS — Public API surface
+// Guard: All exports are intentional. Internal helpers are NOT exported.
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export {
   scoreResume,

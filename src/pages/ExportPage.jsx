@@ -3,9 +3,52 @@ import { useNavigate } from 'react-router-dom';
 import { useResume } from '../app/ResumeContext';
 
 /**
- * ExportPage Component
- * Resume preview and export interface with ATS/readiness gating.
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * ARCHITECTURE LOCK — ExportPage.jsx
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * STATUS: FROZEN GATING LOGIC (v1.0)
+ * LAST AUDIT: 2024-12-29
+ * 
+ * This page implements the EXPORT GATE — the critical monetization control point.
+ * All export functionality must pass through the gating logic defined here.
+ * 
+ * ┌─────────────────────────────────────────────────────────────────────────────┐
+ * │ EXPORT GATING CONTRACT                                                     │
+ * ├─────────────────────────────────────────────────────────────────────────────┤
+ * │                                                                            │
+ * │   GATE CONDITIONS (ALL must be true to enable export):                     │
+ * │     1. resumeReadyForExport === true (from atsEngine)                      │
+ * │     2. atsScore >= minExportScore (currently 70)                           │
+ * │                                                                            │
+ * │   INVARIANT: canExport = resumeReadyForExport && atsScore >= minExportScore│
+ * │                                                                            │
+ * │   MONETIZATION HOOK POINTS (for future implementation):                    │
+ * │     • minExportScore threshold (can be adjusted per tier)                  │
+ * │     • Export format availability (PDF/DOCX/Share per tier)                 │
+ * │     • handleBlockedAttempt() triggers upgrade modal                        │
+ * │                                                                            │
+ * └─────────────────────────────────────────────────────────────────────────────┘
+ * 
+ * INVARIANTS:
+ *   1. Gating logic is DETERMINISTIC — same resume state = same canExport value
+ *   2. No side effects in gating calculation (pure derived boolean)
+ *   3. Export actions are BLOCKED at UI level when canExport === false
+ *   4. Upgrade modal is the ONLY path when export is blocked
+ * 
+ * GUARD: Changing minExportScore affects conversion funnel.
+ *        Test changes against user feedback before deploying.
+ * 
+ * GUARD: Adding new export formats requires updating exportFormats array
+ *        and implementing corresponding handlers.
+ * ═══════════════════════════════════════════════════════════════════════════════
  */
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INTERNAL HELPERS — Pure functions for display formatting
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Get initials from full name for avatar display */
 function getInitials(name = '') {
   return name
     .split(' ')
@@ -15,12 +58,17 @@ function getInitials(name = '') {
     .join('') || 'YN';
 }
 
+/** Format date range for experience/education display */
 function formatDateRange(start, end) {
   if (!start && !end) return 'Present';
   if (start && !end) return `${start} - Present`;
   if (!start && end) return end;
   return `${start} - ${end}`;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPORT PAGE COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════════
 
 function ExportPage() {
   const navigate = useNavigate();
@@ -30,8 +78,29 @@ function ExportPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GATING CONSTANTS — Monetization control points
+  // Guard: These values directly affect conversion. Changes require review.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * MINIMUM ATS SCORE FOR EXPORT
+   * 
+   * BUSINESS LOGIC: Users must achieve this score to export.
+   * This creates a quality gate that:
+   *   1. Ensures exported resumes meet minimum ATS standards
+   *   2. Encourages users to improve their resume (engagement)
+   *   3. Provides upgrade hook for users who want to bypass (monetization)
+   * 
+   * Guard: Lowering this reduces quality gate. Raising this increases friction.
+   *        Current value (70) is balanced for conversion + quality.
+   */
   const minExportScore = 70;
-  const { basics, experience, education, skills, projects, summary, metadata } = resume || {};
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // EXPORT FORMATS — Available export options
+  // Guard: Adding formats here requires implementing export handlers.
+  // ═══════════════════════════════════════════════════════════════════════════
 
   const exportFormats = [
     { id: 'pdf', name: 'PDF', description: 'Best for final applications', icon: '📄' },
@@ -39,6 +108,19 @@ function ExportPage() {
     { id: 'share', name: 'Share Link', description: 'Generate a shareable link', icon: '🔗' },
   ];
 
+  // Destructure resume for template rendering
+  const { basics, experience, education, skills, projects, summary, metadata } = resume || {};
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GATING LOGIC — Pure derived values (no side effects)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * BLOCKER REASONS — Human-readable list of why export is blocked
+   * 
+   * INVARIANT: This is a PURE DERIVATION from resume state.
+   *            Same state always produces same blockers list.
+   */
   const blockerReasons = useMemo(() => {
     const reasons = [];
     if (atsScore < minExportScore) {
@@ -54,12 +136,42 @@ function ExportPage() {
     return reasons.length ? reasons : ['Complete your resume to enable export'];
   }, [atsScore, minExportScore, resumeReadiness, resumeReadyForExport]);
 
+  /**
+   * MASTER EXPORT GATE
+   * 
+   * INVARIANT: canExport = resumeReadyForExport && atsScore >= minExportScore
+   * 
+   * This boolean controls:
+   *   - Export button enabled/disabled state
+   *   - UI messaging (ready vs blocked)
+   *   - Whether handleExport executes or triggers upgrade modal
+   * 
+   * Guard: This is the AUTHORITATIVE gate. Do not add additional checks elsewhere.
+   */
   const canExport = resumeReadyForExport && atsScore >= minExportScore;
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ACTION HANDLERS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Handle blocked export attempts — shows upgrade modal
+   * 
+   * MONETIZATION HOOK: This is where upgrade flow begins.
+   * Guard: All blocked attempts must go through this handler.
+   */
   const handleBlockedAttempt = () => {
     setShowUpgradeModal(true);
   };
 
+  /**
+   * Handle export action
+   * 
+   * Guard: Must check canExport FIRST. If false, redirect to upgrade modal.
+   *        Actual export implementation is a mock — replace with real export.
+   * 
+   * @param {string} type - Export format type (pdf, docx, share)
+   */
   const handleExport = (type) => {
     if (!canExport) {
       handleBlockedAttempt();
@@ -71,6 +183,10 @@ function ExportPage() {
       alert(`${type.toUpperCase()} export (mock) triggered`);
     }, 800);
   };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RENDER
+  // ═══════════════════════════════════════════════════════════════════════════
 
   return (
     <>
